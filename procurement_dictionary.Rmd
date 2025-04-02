@@ -1,0 +1,78 @@
+---
+title: "USAID International Lab Supply Total Procurement Costs"
+subtitle: "Data Dictionary"
+author: "caitl-k"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The following information was taken from Kaggle where a .txt data dictionary for this dataset was posted. I re-structrured the dictionary into a readable format and organized it for use alongside the main .Rmd. 
+
+1. **ID**: Numeric primary key indentifer of the line of data in our analytical tool 
+
+2. **Project Code**: PEPFAR project codes
+
+3. **PQ**: Price quote number; "Pre-PQ Process" indicates deliveries that occurred before the PQ process was put in place in mid-2009.
+
+4. **PO/SO**: Purchase order (PO) number (for Direct Drop deliveries), or sales order (SO) number (for from Regional Delivery Center (RDC) deliveries); PO is not applicable for RDC-originated deliveries
+
+5. **ASN/DN**: Shipment number; Advanced Shipment Note (ASN) for Direct Drop deliveries or Delivery Note (DN) for RDC-originated deliveries
+
+6. **Country**: Destination country
+
+7. **Managed By**: SCMS managing office; Program Management Office (PMO) in the U.S. or the relevant SCMS field office
+
+8. **Fulfill Via**: Method by which the shipment was fulfilled; Direct Drop from vendor or from stock available in the RDCs
+
+9. **Vendor INCO Term**: The vendor INCO term (also known as International Commercial Terms) for Direct Drop deliveries; not applicable for RDC-originated deliveries
+
+10. **Shipment Mode**: Method by which commodities are shipped
+
+11. **PQ First Sent to Client Date**: Date the PQ was first sent to the client; Pre-PQ Process indicates deliveries that occurred before the PQ process was put in place in mid-2009 and "Date Not Captured" denotes where date was not captured
+
+12. **PO Sent to Vendor Date**: Date the PO is first sent to the vendor; not applicable for RDC-originated deliveries; "Date Not Captured" denotes where date was not captured
+
+13. **Scheduled Delivery Date**: Current anticipated delivery date; this date is not equivalent to the client-promised delivery date and should not be used to determine on-time perform
+
+14. **Delivered to Client Date**: Actual date of delivery to client; transactions are included in the dataset only after the goods have been delivered to the client
+
+15. **Recorded Delivery Date**: Date delivery to client was actually recorded in SCMS information systems; used for official SCMS reporting. Deliveries are only recorded in SCMS systems once all necessary documentation has been received. Due to documentation delays, there can be a lag between the time goods are physically delivered to the client and the date on which all necessary documentation has been received
+
+16. **Product Group**: Product group for item (`ARV`, `HRDT`, `ACT`, `ANTM`, `ARV`, `HRDT`, `MRDT`)
+
+17. **Product Classification**: Identifies relevant product sub-classifications, such as whether ARVs are pediatric or adult, whether a malaria product is an artemisinin-based combination therapy (ACT), etc.
+
+18. **Vendor**: Vendor name; SCMS is the vendor for RDC-originated deliveries (product can be from multiple manufacturers, based on available stock)
+
+19. **Item Description**: Product name and formulation from Partnership for Supply Chain Management (PFSCM) Item Master
+
+20. **Molecule/Test Type**: Active drug(s) or test kit type
+
+21. **Brand**: Generic or branded name for the item
+
+22. **Dosage**: Item dosage with units
+
+23. **Dosage Form**: Dosage form for the item (tablet, oral solution, injection, etc.); `FDC` denotes if the item contains a fixed-dose combination (FDC) formulation, `Blister` denotes if the item is presented in blister packaging, and `Co-blister` denotes when the item contains more than one product packaged together in blister packaging.
+
+24. **Unit of Measure**: Pack quantity (pills or test kits) used to compute unit price
+
+25. **Line Item Quantity**: Total quantity (packs) of commodity per line item
+
+26. **Line Item Value**: Total value of commodity per line item in USD
+
+27. **Pack Price**: Cost per pack (i.e. month's supply of ARVs, pack of 60 test kits) in USD
+
+28. **Unit Price**: Cost per pill (for drugs) or per test (for test kits) in USD
+
+29. **Manufacturing Site**: Identifies manufacturing site for the line item for direct drop and RDC-originated deliveries
+
+30. **First Line Designation**: Designates if the line in question shows the aggregated freight costs and weight associated with all items on the ASN/DN; there may or may not be other associated lines with each ASN/DN
+
+31. **Weight**: Weight for all lines on an ASN/DN in kilograms; present only for `FirstLine` designated lines
+
+32. **Freight Cost**: Freight charges associated with all lines on the respective ASN/DN in USD; present only for `FirstLine` designated lines; for C- and D-vendor INCO terms deliveries, freight costs may be included in the unit price for the commodities as indicated by `Freight Included in Commodity Price`; all other lines are `Invoiced Separately`
+
+33. **Line Item Insurance**: Line item cost of insurance in USD; created by applying an annual flat rate (%) to commodity cost; prior to 6/1/2009, lines are still under analysis for correct rates because they do not have PQs and cannot be computed in the same way that they currently are across the partnership
