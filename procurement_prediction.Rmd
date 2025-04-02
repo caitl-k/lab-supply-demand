@@ -1,0 +1,283 @@
+---
+title: "Predicting International Lab Supply Total Procurement Costs"
+author: "caitl-k"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(tidyverse)
+library(knitr)
+```
+
+## Business Understanding
+
+### Foreword
+
+The following is a total procurement cost prediction analysis using a dataset from the United States Agency for International Development (USAID). The title of the dataset is "Supply Chain Shipment Pricing Dataset" and its presumed use is for supply chain-related work. It contains antiretroviral and HIV lab shipments to supported countries along with commodity pricing and other supply chain expenses. Using existing data, a `Total Cost` variable will be calculated and appended to the dataset to serve as the target variable. Based on existing data, total procurement cost is calculated as follows:
+
+$$
+\text{Total Procurement Cost}= \text{Line Item Value}+\text{Freight Cost}+\text{Line Item Insurance}
+$$
+
+Existing variables will act as the predictors. 
+
+### Objectives
+
+### Assumptions
+
+### Potential Constraints
+
+### Relevant Documents
+
+* Data Dictionary
+
+### Original Dataset
+
+https://web.archive.org/web/20250115221623/https://catalog.data.gov/dataset/supply-chain-shipment-pricing-data-07d29
+
+https://www.kaggle.com/datasets/divyeshardeshana/supply-chain-shipment-pricing-data/data
+
+---
+
+## Data Understanding
+
+Some slight feature engineering must be completed prior to doing any exploratory analyses to ensure the dataset is properly structured. 
+
+### Dataset Structuring
+
+Variables will be re-named to follow a consistent and readable format.
+
+```{r, echo = FALSE}
+ship.df <- read.csv("Supply_Chain_Shipment_Pricing_Dataset.csv")
+```
+
+```{r, echo = FALSE}
+ship.df <- ship.df %>%
+  rename(pq = pq..,
+         po.so = po...so..,
+         asn.dn = asn.dn..,
+         unit.of.measure.per.pack = unit.of.measure..per.pack.,
+         weight.kg = weight..kilograms.,
+         freight.cost = freight.cost..usd.,
+         line.item.insurance.cost = line.item.insurance..usd.
+         )
+
+sum(ship.df$weight.kg == "Weight Captured Separately")
+sum(ship.df$weight.kg == " ")
+```
+
+```{r}
+str(ship.df)
+```
+
+A function is defined to calculate total procurement cost.
+
+The `freight.cost` column contains some character observations, so exceptions will be handled in the function. The meaning of each observation as outlined in the data dictionary will determine handling:
+* `Freight Included in Commodity` - Freight cost is already included in the line item's value. 
+* `See ASN...` - References another row's freight cost. Function will look up the row and incorporate that freight cost into the total procurement cost.
+* `Invoiced Separately` - Freight cost was invoiced separately and cannot be incorporated. Will result in a missing value for total procurement for that row.
+
+```{r}
+# total = line item value + freight costs + line item insurance
+calc_total <- function(x) {
+
+  total.cost <- numeric(nrow(x))
+  
+  for (i in 1:nrow(x)) {
+
+    if (grepl("Freight Included in Commodity", x$freight.cost[i])) {
+      total.cost[i] <- x$line.item.value[i] + x$line.item.insurance[i]
+    }
+      else if (grepl("^See", x$freight.cost[i])) {
+        extracted.id <- gsub(".*ID#:(\\d+).*", "\\1", x$freight.cost[i])
+        match.cost <- x$freight.cost[which(x$id == extracted.id)]
+        x$freight.cost[i] <- match.cost
+        total.cost[i] <- x$line.item.value[i] + as.numeric(match.cost) + x$line.item.insurance[i]
+    }
+      else if (x$freight.cost[i] == "Invoiced Separately") {
+      
+      # Case 2: freight invoiced separately
+      total.cost[i] <- NA
+    } else if (grepl("\\d", x$freight.cost[i])) {
+      # Case 3: normal total
+      total.cost[i] <- x$line.item.value[i] + as.numeric(x$freight.cost[i]) + x$line.item.insurance[i]
+    }
+  }
+  return(total.cost)
+}
+```
+
+Another function is defined to address a similar issue in another variable, `weight.kg`. Similar character observations populate this column that need to be handled:
+* `Weight Captured Separately` - 
+* `See ASN/DN (ID#: )` - 
+
+```{r}
+calc_weight <- function(x) {
+
+  weight.kg <- numeric(nrow(x))
+  
+  for (i in 1:nrow(x)) {
+
+    if (grepl("Weight Captured Separately", x$weight.kg[i])) {
+      weight.kg[i] <- NA
+    }
+      else if (grepl("^See", x$weight.kg[i])) {
+        extracted.id <- gsub(".*ID#:(\\d+).*", "\\1", x$weight.kg[i])
+        match.wt <- x$weight.kg[which(x$id == extracted.id)]
+        x$weight.kg[i] <- match.wt
+        weight.kg[i] <- as.numeric(match.wt)
+    } else if (grepl("^[0-9]", x$weight.kg[i])) {
+      weight.kg[i] <- x$weight.kg[i]
+    }
+  }
+  return(weight.kg)
+}
+```
+
+There are numerous date columns referencing when price quotes were sent to a client or vendor, in addition to supply delivery dates. These columns are not useful in their current form for exploratory work. 
+
+Additionally, because the interest is in total procurement cost, useful information can be extracted from certain date features to make them easier to understand. For example, instead of considering every individual delivery date, we can just extract the delivery month to try and capture cyclical patterns. 
+
+Another useful metric to explore might be extracting lag times between actual and scheduled delivery dates. The following date features will be engineered for exploratory purposes:
+
+* `delivered.to.client.date` - Actual delivery date
+* `scheduled.delivery.date` - Scheduled delivery date
+
+The remaining date features will not be engineered for the following reasons:
+
+* `pq.first.sent.to.client.date` - Contains a significant number of missing observations due to those observations being recorded prior to implementation of a new price quoting process
+* `po.sent.to.vendor.date` - Contains a significant number of missing observations due to the information being denoted as irrelevant in the dataset
+* `delivery.recorded.date` - A redundant feature that serves no exploratory or predictive purpose and is likely for internal record-keeping
+
+Adding these additional features now might provide additional insights during the exploratory analysis and better inform the feature selection process during preparation.
+
+```{r}
+ship.df <- ship.df %>%
+  mutate(
+    po.sent.to.vendor.date = format(po.sent.to.vendor.date, "%")
+  )
+```
+
+
+
+The `total_cost` function is applied to the dataframe to yield the new `total.cost` column and the `calc_weight` function is applied to `weight.kg` to replace reference observations with the actual item weight for that row.
+
+Other features are re-typed prior to conducting any exploratory analyses.
+
+All features are re-selected in a new order.
+
+```{r}
+ship.df <- ship.df %>%
+  mutate(
+    total.cost = calc_total(ship.df),
+    weight.kg = calc_weight(ship.df),
+    weight.kg = as.numeric(weight.kg),
+    id = as.character(id),
+    first.line.designation = as.factor(first.line.designation),
+    brand = as.factor(brand),
+    product.group = as.factor(product.group),
+    sub.classification = as.factor(sub.classification),
+    vendor.inco.term = as.factor(vendor.inco.term),
+    vendor = as.factor(vendor),
+    managed.by = as.factor(managed.by),
+    shipment.mode = as.factor(shipment.mode)
+  ) %>%
+  select(id, item.description, unit.of.measure.per.pack, weight.kg, unit.price, pack.price,
+         line.item.value, line.item.quantity, freight.cost, line.item.insurance.cost, total.cost,
+         asn.dn, first.line.designation, item.description, brand, molecule.test.type, dosage, dosage.form,
+         product.group, sub.classification, vendor.inco.term, vendor, first.line.designation, manufacturing.site,
+         managed.by, project.code, pq, po.so, shipment.mode, country, fulfill.via, pq.first.sent.to.client.date,
+         po.sent.to.vendor.date, scheduled.delivery.date, delivered.to.client.date, delivery.recorded.date)
+View(ship.df)
+```
+
+These adjustments are essential prior to beginning any exploratory analyses to ensure optimal structuring. 
+
+### Identifying Missing Values
+
+For this analysis, missing values include both NA and blank observations. These will be identified to gain an understanding of how practical use of those columns may be and to anticipate imputation techniques.
+
+```{r}
+calc_missing <- function(x) {
+  missing.val <- data.frame(
+    col = names(x),
+    na.count = colSums(is.na(x)),
+    blank = colSums(x == "" | x == " ")
+  ) %>%
+    filter(na.count > 0 | blank > 0)
+  return(missing.val)
+}
+
+kable(calc_missing(ship.df),
+      col.names = c("Feature", "# of Missing Values", "# of Blanks"),
+      row.names = FALSE)
+```
+
+```{r}
+ggplot(ship.df, aes(x = line.item.value, y = total.cost, color = weight.kg)) + 
+  geom_point(show.legend = TRUE) +
+  scale_color_gradient(
+                       na.value = "red", guide = "legend") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplot(ship.df, aes(x = line.item.value, y = total.cost, color = line.item.insurance.cost)) + 
+  geom_point(show.legend = TRUE) +
+  scale_color_gradient(low = "green", high = "red",
+                       na.value = "blue", guide = "legend") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+
+### Characterizing Numeric Predictors
+
+
+
+
+### Characterizing Categorical Predictors
+
+
+
+### Correlation
+
+```{r}
+ship.num.df <- ship.df %>%
+  select(where(is.numeric)) %>%
+  na.omit()
+```
+
+---
+
+## Data Preparation
+
+### Select Predictive Features
+
+Based on the data dictionary, it is evident many variables in this dataset are irrelevant to predicting total procurement cost. Those variables are as follows:
+
+* `id` - A unique key assigned to each row
+* `project.code` - A unique PEPFAR identifying code
+* `pq` - Price quote number
+* `asn.dn` - Shipment number
+* `delivery.recorded.date` - Date in which a delivery date was recorded into the SCMS information system, which is irrelevant as the actual delivery date is already defined separately
+
+
+### Imputing Missing Values
+
+```{r}
+wt.na <- ship.df %>%
+  filter(!is.na(weight.kg))
+
+wt.na.rmv <- ship.df %>%
+  filter(is.na(weight.kg))
+
+wt.model <- lm(weight.kg ~ .,
+               data = wt.na.rmv)
+summary(wt.model)
+```
+
+### Feature Engineering
+
+
