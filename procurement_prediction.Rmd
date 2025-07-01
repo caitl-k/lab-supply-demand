@@ -1,59 +1,109 @@
 ---
-title: "Predicting International Lab Supply Total Procurement Costs"
+title: "Predicting International Lab Supply Demand with a Stacked Meta-Learner"
 author: "caitl-k"
-output: html_document
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
 ---
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-library(caret)
-library(tidyverse)
-library(knitr)
-```
 
 ## Business Understanding
 
+Supply chain forecasting seeks to predict and understand product demand and volume to inform decision-making and anticipate changes. Product demand is one of many key business operations that feed into a supply chain.
+
+```{r SupplyChainSchematic, echo = FALSE}
+DiagrammeR::grViz("digraph {
+
+graph [layout = dot, rankdir = TB]
+
+node [shape = rectangle, style = filled, fillcolor = Seashell]
+
+demand [label = 'Demand']
+inventory [label = 'Inventory']
+pricing [label =  'Pricing']
+transportation [label = 'Transporation']
+labor [label = 'Labor']
+production [label = 'Production']
+supplier [label = 'Supplier Managing']
+disruptions [label = 'Disruptions']
+supplychain [label = 'Supply Chain', fillcolor = Bisque]
+
+{demand inventory pricing transportation labor production supplier disruptions} -> supplychain
+
+}")
+```
+
+Demand modeling can incorporate both historical and real-time data to meet demands. Quantitative forecasting methods may employ machine learning to understand a dataset and make appropriate predictions. One approach is to employ a regression analysis to model how data variables interact and what factors are more influential on a target variable, such as product demand.
+
+Understanding these relationships is the strength of the regression approach. 
+
+Global health supply chains can be particularly challenging to anticipate demand due to the nature of disease outbreaks. The dataset in this analysis includes a wide variety of laboratory kits and other diagnostic supplies shipped to many different countries. The majority of test kits and drugs are targeting HIV or Malaria. 
+
 ### Foreword
 
-The following is a total procurement cost prediction analysis using a dataset from the United States Agency for International Development (USAID). The title of the dataset is "Supply Chain Shipment Pricing Dataset" and its presumed use is for supply chain-related work. It contains antiretroviral and HIV lab shipments to supported countries along with commodity pricing and other supply chain expenses. Using existing data, a `Total Cost` variable will be calculated and appended to the dataset to serve as the target variable. Based on existing data, total procurement cost is calculated as follows:
+The following is a regression-based international laboratory supply demand analysis using a dataset from the United States Agency for International Development (USAID). The title of the dataset is "Supply Chain Shipment Pricing Dataset", and it tracks anti-retroviral (ART) and HIV lab-related shipments to supported countries between 2006 and 2015.
 
-$$
-\text{Total Procurement Cost}= \text{Line Item Value}+\text{Freight Cost}+\text{Line Item Insurance}
-$$
+The native dataset contains a mix of 33 character and numeric variables, with each variable occupying a single column and each row representing an order.
 
-Existing variables will act as the predictors. 
+Variable information ranges from commodity pricing to supply chain expenses, manufacturing sites, vendors, shipment mediums, and more.
+
+Regression tasks involve prediction of a continuous numeric outcome, and in this instance, item quantities for orders can be speculated to vary quite a lot depending on demand. Product demand is multi-faceted and difficult to predict due to countless external factors that can change the supply chain dynamic in an instant. Despite this, existing data can be utilized to train a model to attempt prediction of item quantities based on other variables (predictors) in the dataset. Being able to predict demand for a product would allow a model to take simulated future order information and output what the demand for a particular product might be. This allows for robust supply chain optimization to anticipate shipment quantities. It also opens the door to conducting further demand analysis to characterize when, where, and which products are needed. 
 
 ### Objectives
 
+The objective of this analysis is to use both existing and engineered variables to predict `item.quantity`, which is presumed to reflect product demand for each order between 2006 and 2015.
+
+We are primarily interested in characterizing how existing predictive features contribute to the overall demand of an item.
+
+Variables will be referred to as features as is common for modeling tasks. Features other than `item.quantity` may be referred to as "predictors" or "predictive features", and `item.quantity` as "target feature" or simply "target".  
+
 ### Assumptions
 
-### Potential Constraints
+To predict item quantities, the final model will operate under the assumption that certain information is not available. This includes order weight, insurance costs, freight costs and total cost. In practice, item quantity is determined, and afterwards costs are calculated. This model should be able to predict with features available up to and including item quantity and no further, as this is not a cost prediction analysis.
 
-### Relevant Documents
+These variables are still highly valuable and will remain for extracting key insights about product demand.
 
-* Data Dictionary
+### Dataset & Licensing
 
-### Original Dataset
-
-https://web.archive.org/web/20250115221623/https://catalog.data.gov/dataset/supply-chain-shipment-pricing-data-07d29
-
-https://www.kaggle.com/datasets/divyeshardeshana/supply-chain-shipment-pricing-data/data
+(Creative Commons) https://web.archive.org/web/20250115221623/https://catalog.data.gov/dataset/supply-chain-shipment-pricing-data-07d29
 
 ---
 
 ## Data Understanding
 
-Some slight feature engineering must be completed prior to doing any exploratory analyses to ensure the dataset is properly structured. 
+Prior to exploring this dataset, some re-structuring is necessary to ensure usability and correct data typing. For example, non-numeric features need to be factored, or broken into different categories, while numeric features must be all-numeric.
 
-### Dataset Structuring
+Feature engineering will also be performed, which involves creating new features using existing information to derive new insights or clarify some existing feature.
 
-Variables will be re-named to follow a consistent and readable format.
+Individual features will be explored and various functions will be defined to address any problems preventing initial analysis. 
 
-```{r, echo = FALSE}
-ship.df <- read.csv("Supply_Chain_Shipment_Pricing_Dataset.csv")
+### Dataset Re-Structuring
+
+Features will be re-named to follow a consistent and readable format. The native dataset is displayed below.
+
+```{r InstallPackages, include = FALSE}
+packages <- c("ggplot2", "tidyverse", "knitr", "caret",
+              "caretEnsemble", "rpart", "rpart.plot",
+              "glmnet", "earth", "randomForest", "DiagrammeR",
+              "parallel", "doParallel", "foreach", "xgboost", "paletteer")
+
+installed.packages <- packages %in% rownames(installed.packages())
+
+if (any(installed.packages == FALSE)) {
+  install.packages(packages[!installed.packages], 
+                   dependencies = TRUE, 
+                   quiet = TRUE)
+}
+
+invisible(lapply(packages, library, character.only = TRUE))
 ```
 
-```{r, echo = FALSE}
+```{r ReadCSV, echo = FALSE}
+ship.df <- read.csv("https://web.archive.org/web/20250115221623/https://data.usaid.gov/api/views/a3rc-nmf6/rows.csv?accessType=DOWNLOAD")
+```
+
+```{r Rename, echo = FALSE}
 ship.df <- ship.df %>%
   rename(pq = pq..,
          po.so = po...so..,
@@ -61,192 +111,703 @@ ship.df <- ship.df %>%
          unit.of.measure.per.pack = unit.of.measure..per.pack.,
          weight.kg = weight..kilograms.,
          freight.cost = freight.cost..usd.,
-         line.item.insurance.cost = line.item.insurance..usd.
-         )
-
-sum(ship.df$weight.kg == "Weight Captured Separately")
-sum(ship.df$weight.kg == " ")
+         item.quantity = line.item.quantity,
+         item.insurance.cost = line.item.insurance..usd.,
+         actual.delivery = delivered.to.client.date,
+         scheduled.delivery = scheduled.delivery.date)
 ```
 
-```{r}
+```{r Structure, echo = FALSE}
 str(ship.df)
 ```
 
-A function is defined to calculate total procurement cost.
+`freight.cost`, which should only contain numeric values, has some character observations denoting special circumstances for some orders. The meaning of each circumstance as outlined in the data dictionary is denoted below, in addition to handling strategy:
 
-The `freight.cost` column contains some character observations, so exceptions will be handled in the function. The meaning of each observation as outlined in the data dictionary will determine handling:
-* `Freight Included in Commodity` - Freight cost is already included in the line item's value. 
-* `See ASN...` - References another row's freight cost. Function will look up the row and incorporate that freight cost into the total procurement cost.
-* `Invoiced Separately` - Freight cost was invoiced separately and cannot be incorporated. Will result in a missing value for total procurement for that row.
+* `Freight Included in Commodity` - Indicates the order's freight cost was already included in the line item's value, so it is effectively equal to zero. 
+* `See ASN...` - References another row's freight cost. The function will look up the referenced row and replace that freight cost with the original observation.
+* `Invoiced Separately` - The freight cost was invoiced separately and is unknown. These costs cannot be incorporated and are replaced with missing values.
 
-```{r}
-# total = line item value + freight costs + line item insurance
-calc_total <- function(x) {
+A function called `replace_freight` is defined to perform the necessary `freight.cost` observation replacements.
 
-  total.cost <- numeric(nrow(x))
-  
+```{r replace_freight, echo = FALSE}
+# takes df
+replace_freight <- function(x) {
+  # initialize return 
+  freight.cost <- numeric(nrow(x))
+  # loop through columns
   for (i in 1:nrow(x)) {
-
+    # condition 1
     if (grepl("Freight Included in Commodity", x$freight.cost[i])) {
-      total.cost[i] <- x$line.item.value[i] + x$line.item.insurance[i]
+      freight.cost[i] < - NA
     }
-      else if (grepl("^See", x$freight.cost[i])) {
-        extracted.id <- gsub(".*ID#:(\\d+).*", "\\1", x$freight.cost[i])
-        match.cost <- x$freight.cost[which(x$id == extracted.id)]
-        x$freight.cost[i] <- match.cost
-        total.cost[i] <- x$line.item.value[i] + as.numeric(match.cost) + x$line.item.insurance[i]
+    # condition 2
+    else if (grepl("^See", x$freight.cost[i])) {
+      extracted.id <- gsub(".*ID#:(\\d+).*", "\\1", x$freight.cost[i])
+      match.cost <- x$freight.cost[which(x$id == extracted.id)]
+      x$freight.cost[i] <- match.cost
+      freight.cost[i] <- as.numeric(match.cost)
     }
-      else if (x$freight.cost[i] == "Invoiced Separately") {
-      
-      # Case 2: freight invoiced separately
-      total.cost[i] <- NA
-    } else if (grepl("\\d", x$freight.cost[i])) {
-      # Case 3: normal total
-      total.cost[i] <- x$line.item.value[i] + as.numeric(x$freight.cost[i]) + x$line.item.insurance[i]
+    # condition 3
+    else if (x$freight.cost[i] == "Invoiced Separately") {
+      freight.cost[i] <- NA
+    }
+    # condition 4
+    else if (grepl("\\d", x$freight.cost[i])) {
+      freight.cost[i] <- as.numeric(x$freight.cost[i])
+    }
+    else {
+      freight.cost[i] <- NA
     }
   }
-  return(total.cost)
+  return(freight.cost)
 }
+
+suppressWarnings(ship.df$freight.cost <- replace_freight(ship.df))
 ```
 
-Another function is defined to address a similar issue in another variable, `weight.kg`. Similar character observations populate this column that need to be handled:
-* `Weight Captured Separately` - 
-* `See ASN/DN (ID#: )` - 
+A second function called `replace_weight` is defined to address a similar issue in another predictor variable, `weight.kg`. Similar character observations populate this column that need to be handled:
 
-```{r}
-calc_weight <- function(x) {
+* `Weight Captured Separately` - Weight for the order was recorded separately and is effectively deprecated information from this dataset. A missing value will be assigned for these cases.
+* `See ASN/DN (ID#: )` - References another row's weight. Function will look up the row and append that weight value to the original observation.
 
+```{r replace_weight, echo = FALSE}
+# takes df
+replace_weight <- function(x) {
+  # initialize return
   weight.kg <- numeric(nrow(x))
-  
+  # loop through columns
   for (i in 1:nrow(x)) {
-
+    # condition 1
     if (grepl("Weight Captured Separately", x$weight.kg[i])) {
       weight.kg[i] <- NA
     }
-      else if (grepl("^See", x$weight.kg[i])) {
-        extracted.id <- gsub(".*ID#:(\\d+).*", "\\1", x$weight.kg[i])
-        match.wt <- x$weight.kg[which(x$id == extracted.id)]
-        x$weight.kg[i] <- match.wt
-        weight.kg[i] <- as.numeric(match.wt)
-    } else if (grepl("^[0-9]", x$weight.kg[i])) {
+    # condition 2
+    else if (grepl("^See", x$weight.kg[i])) {
+      extracted.id <- gsub(".*ID#:(\\d+).*", "\\1", x$weight.kg[i])
+      match.wt <- x$weight.kg[which(x$id == extracted.id)]
+      x$weight.kg[i] <- match.wt
+      weight.kg[i] <- as.numeric(match.wt)
+    }
+    # condition 3
+    else if (grepl("^[0-9]", x$weight.kg[i])) {
       weight.kg[i] <- x$weight.kg[i]
+    }
+    else {
+      weight.kg[i] <- NA
     }
   }
   return(weight.kg)
 }
+
+suppressWarnings(ship.df$weight.kg <- replace_weight(ship.df))
 ```
 
-There are numerous date columns referencing when price quotes were sent to a client or vendor, in addition to supply delivery dates. These columns are not useful in their current form for exploratory work. 
+Finally, two more functions, `classify_product` and `group_country`, are defined to re-group categories contained in `dosage.form` and `country`. The reason for this is to provide two broader, simplified versions of these features as their current forms contain highly specific information that may be more interpretable and explorable if generalized:
 
-Additionally, because the interest is in total procurement cost, useful information can be extracted from certain date features to make them easier to understand. For example, instead of considering every individual delivery date, we can just extract the delivery month to try and capture cyclical patterns. 
+* `product` - Broad product dosage form (tablet, oral solution, injection, etc.)
+* `region` - Area of the world an order was shipped to
 
-Another useful metric to explore might be extracting lag times between actual and scheduled delivery dates. The following date features will be engineered for exploratory purposes:
+```{r classify_product, echo = FALSE}
+# takes vector
+classify_product <- function(x) {
+  # initialize character return
+  product <- character(length((x)))
+  # loop through character vector
+  for(i in 1:length(x)) {
+    if (x[i] == "Chewable/dispersible tablet") {
+      product[i] <- "Chewable Tablet"
+    }
+    else if (x[i] == "Chewable/dispersible tablet - FDC") {
+      product[i] <- "Chewable FDC Tablet"
+    }
+    else if (x[i] == "Tablet") {
+      product[i] <- "Regular Tablet"
+    }
+    else if (x[i] == "Tablet - blister") {
+      product[i] <- "Regular Tablet"
+    }
+    else if (x[i] == "Tablet - FDC") {
+      product[i] <- "Regular FDC Tablet"
+    }
+    else if (x[i] == "Tablet - FDC + blister") {
+      product[i] <- "Regular FDC Tablet"
+    }
+    else if (x[i] == "Tablet - FDC + co-blister") {
+      product[i] <- "Regular Tablet"
+    }
+    else if (x[i] == "Capsule") {
+      product[i] <- "Regular Capsule"
+    }
+    else if (x[i] == "Delayed-release capsules") {
+      product[i] <- "Delayed-Release Capsule"
+    }
+    else if (x[i] == "Delayed-release capsules - blister") {
+      product[i] <- "Delayed-Release Capsule"
+    }
+    else {
+      product[i] <- x[i]
+    }
+  }
+  return(product)
+}
 
-* `delivered.to.client.date` - Actual delivery date
-* `scheduled.delivery.date` - Scheduled delivery date
+suppressWarnings(ship.df$product <- classify_product(ship.df$dosage.form))
+```
 
-The remaining date features will not be engineered for the following reasons:
+```{r group_country, echo = FALSE}
+group_country <- function(x) {
+  region <- character(length(x))
+  for (i in 1:length(x)) {
+    if (grepl("Côte d'Ivoire|Nigeria|Zambia|Tanzania|Rwanda|Zimbabwe|Ethiopia|South Africa|Namibia|Botswana|Mozambique|Kenya|Uganda|Senegal|Benin|Lesotho|Swaziland|Ghana|Angola|Sierra Leone|Cameroon|South Sudan|Burundi|Malawi|Congo, DRC|Sudan|Mali|Togo|Liberia|Burkina Faso|Guinea|Libya", ignore.case = TRUE, x[i])) {
+      region[i] <- "Africa"
+    }
+    else if (grepl("Vietnam|Kazakhstan|Kyrgyzstan|Pakistan|Afghanistan", ignore.case = TRUE, x[i])) {
+      region[i] <- "Asia"
+    }
+    else if (grepl("Haiti|Guyana|Dominican Republic|Guatemala|Belize", ignore.case = TRUE, x[i])) {
+      region[i] <- "Americas"
+    }
+    else if (x[i] == "Lebanon") {
+      region[i] <- "Middle East"
+    }
+  }
+  return(region)
+}
 
-* `pq.first.sent.to.client.date` - Contains a significant number of missing observations due to those observations being recorded prior to implementation of a new price quoting process
-* `po.sent.to.vendor.date` - Contains a significant number of missing observations due to the information being denoted as irrelevant in the dataset
-* `delivery.recorded.date` - A redundant feature that serves no exploratory or predictive purpose and is likely for internal record-keeping
+suppressWarnings(ship.df$region <- group_country(ship.df$country))
+```
 
-Adding these additional features now might provide additional insights during the exploratory analysis and better inform the feature selection process during preparation.
+There are numerous date columns referencing when price quotes were sent to a client or vendor, in addition to supply delivery dates. They are not in a date format understandable for R, and a few are not useful for exploratory work:
 
-```{r}
+* `pq.first.sent.to.client.date` - Contains a significant number of missing observations due to those observations being recorded prior to implementation of a new price quoting process.
+* `po.sent.to.vendor.date` - Contains a significant number of missing observations due to it being denoted as irrelevant in the dataset.
+* `delivery.recorded.date` - A redundant feature that serves no exploratory or predictive purpose and is likely for internal record-keeping.
+
+Useful information can be extracted from the remaining date features, `scheduled.delivery` and `actual.delivery`. For example, instead of considering every individual delivery date, the delivery month, year, and day can be extracted to try and capture cyclical patterns: 
+
+* `delivery.month` - Delivery month 
+* `delivery.year` - Delivery year
+* `delivery.day` - Delivery day
+
+Another useful metric to explore might be extracting identifying whether an order was late or not:
+
+* `delivery.late` - Whether `actual.delivery` was later than `scheduled.delivery` (Yes or No)
+
+Adding these features now might provide additional insights during the exploratory analysis and better inform the feature selection process during preparation.
+
+Remaining features will be factored and re-selected in a new order prior to conducting any exploratory analyses.
+
+```{r StructureDF, echo = FALSE}
 ship.df <- ship.df %>%
-  mutate(
-    po.sent.to.vendor.date = format(po.sent.to.vendor.date, "%")
-  )
+  mutate(freight.cost = as.numeric(freight.cost),
+         weight.kg = as.numeric(weight.kg),
+         id = as.character(id),
+         first.line.designation = as.factor(first.line.designation),
+         brand = as.factor(brand),
+         product.group = as.factor(product.group),
+         sub.classification = as.factor(sub.classification),
+         vendor.inco.term = as.factor(vendor.inco.term),
+         vendor = as.factor(vendor),
+         managed.by = as.factor(managed.by),
+         molecule.test.type = as.factor(molecule.test.type),
+         manufacturing.site = as.factor(manufacturing.site),
+         shipment.mode = na_if(shipment.mode, ""),
+         shipment.mode = as.factor(shipment.mode),
+         dosage = na_if(dosage, ""),
+         dosage = if_else(is.na(dosage), "Not Applicable", dosage),
+         dosage = as.factor(dosage),
+         product = as.factor(product),
+         dosage.form = as.factor(dosage.form),
+         actual.delivery = as.Date(actual.delivery, format = "%d-%b-%y"),
+         scheduled.delivery = as.Date(scheduled.delivery, format = "%d-%b-%y"),
+         delivery.lag = as.numeric(actual.delivery - scheduled.delivery),
+         delivery.late = factor(ifelse(delivery.lag > 0, "Yes", "No")),
+         delivery.day = factor(day(actual.delivery)),
+         delivery.month = factor(month(actual.delivery)),
+         delivery.year = factor(year(actual.delivery)),
+         fulfill.via = as.factor(fulfill.via),
+         region = as.factor(region),
+         country = as.factor(country)) %>%
+  select(unit.price, unit.of.measure.per.pack, pack.price, line.item.value, item.quantity,
+         weight.kg, item.insurance.cost, freight.cost, delivery.late, product, delivery.day, delivery.month,
+         delivery.year, shipment.mode, region, country, first.line.designation, brand, dosage, dosage.form,
+         molecule.test.type, product.group, sub.classification, vendor, vendor.inco.term, managed.by,
+         fulfill.via, manufacturing.site, scheduled.delivery, actual.delivery, id, asn.dn, pq, po.so,
+         project.code, item.description, po.sent.to.vendor.date, delivery.recorded.date, pq.first.sent.to.client.date)
 ```
 
+A warning is present regarding introduction of NA values, but this was intentional due to how some of the prior functions were designed. 
 
+### Features of Interest
 
-The `total_cost` function is applied to the dataframe to yield the new `total.cost` column and the `calc_weight` function is applied to `weight.kg` to replace reference observations with the actual item weight for that row.
+Not all features are of interest due to having no relationship to `item.quantity`. Features that were used in the original dataset for internal record-keeping will not be explored, such as:
 
-Other features are re-typed prior to conducting any exploratory analyses.
+* `id` - A unique key assigned to each row
+* `project.code` - A unique PEPFAR identifying code
+* `pq` - Price quote number
+* `po.so` - Purchase order/sales order number
+* `asn.dn` - Shipment number
+* `item.description` - Detailed product description
+* `delivery.recorded.date` - Date in which a delivery date was recorded into the SCMS information system, which is irrelevant as the actual delivery date is already defined separately
+* `first.line.designation` - Reveals if `freight.cost` and `weight.kg` is located on another row or not
 
-All features are re-selected in a new order.
+Particular attention will be paid to features more likely to influence demand based on domain knowledge:
 
-```{r}
-ship.df <- ship.df %>%
-  mutate(
-    total.cost = calc_total(ship.df),
-    weight.kg = calc_weight(ship.df),
-    weight.kg = as.numeric(weight.kg),
-    id = as.character(id),
-    first.line.designation = as.factor(first.line.designation),
-    brand = as.factor(brand),
-    product.group = as.factor(product.group),
-    sub.classification = as.factor(sub.classification),
-    vendor.inco.term = as.factor(vendor.inco.term),
-    vendor = as.factor(vendor),
-    managed.by = as.factor(managed.by),
-    shipment.mode = as.factor(shipment.mode)
-  ) %>%
-  select(id, item.description, unit.of.measure.per.pack, weight.kg, unit.price, pack.price,
-         line.item.value, line.item.quantity, freight.cost, line.item.insurance.cost, total.cost,
-         asn.dn, first.line.designation, item.description, brand, molecule.test.type, dosage, dosage.form,
-         product.group, sub.classification, vendor.inco.term, vendor, first.line.designation, manufacturing.site,
-         managed.by, project.code, pq, po.so, shipment.mode, country, fulfill.via, pq.first.sent.to.client.date,
-         po.sent.to.vendor.date, scheduled.delivery.date, delivered.to.client.date, delivery.recorded.date)
-View(ship.df)
+* `country` - Order destination country
+* `region` - Area of the world an order was shipped to
+* `managed.by` - Supply chain management office
+* `fulfill.via` - Method of shipment fulfillment
+* `vendor.inco.term` - Vendor commercial term
+* `vendor` - Vendor name
+* `scheduled.delivery` - Date order was scheduled for delivery
+* `actual.delivery` - Date order was actually delivered
+* `product.group` - Specific treatment target
+* `product` - Broad product dosage form (tablet, oral solution, injection, etc.)
+* `sub.classification` - Product sub-classifications expanding on `product.group`
+* `molecule.test.type` - Type of test kit
+* `brand` - Generic or branded name of product
+* `dosage` - Product dosage
+* `dosage.form` - Type of dosing for a product, such as tablet, injection, etc.
+* `unit.of.measure.per.pack` - Pack quantity
+* `pack.price` - Cost per product pack
+* `unit.price` - Cost per pill or test
+* `delivery.month` - Delivery month 
+* `delivery.year` - Delivery year
+* `delivery.day` - Delivery day
+* `delivery.late` - Whether `actual.delivery` was later than `scheduled.delivery`
+
+Finally, the remaining features are calculated either directly or indirectly using `item.quantity`:
+
+* `line.item.value` - Total cost of product
+* `freight.cost` - Cost to ship
+* `weight.kg` - Weight of product(s)
+* `line.item.insurance` - Cost to insure shipment 
+
+### Identifying Outliers
+
+Outliers are extreme values not representative of typical orders. For the purposes of this model, outliers are any value more than 1.5 times the interquartile range (IQR) below the first quartile (Q1) or above the third quartile (Q3). The table below showcases the number of outliers found for each numeric feature.
+
+```{r num.df, echo = FALSE}
+num.df <- ship.df %>%
+  select(where(is.numeric)) %>%
+  na.omit()
 ```
 
-These adjustments are essential prior to beginning any exploratory analyses to ensure optimal structuring. 
+```{r count_outlier, echo = FALSE}
+count_outlier <- function(x) {
+  q1 <- quantile(x, probs = 0.25)
+  q3 <- quantile(x, probs = 0.75)
+  IQR <- q3 - q1
+  outlier <- x < q1 - (IQR * 1.5) | x > q3 + (IQR * 1.5)
+  if (length(outlier) > 0) {
+    return(sum(outlier))
+  }
+}
+```
+
+```{r Outliers, echo = FALSE}
+kable(sapply(num.df, function(x) count_outlier(x)),
+      col.names = c("Feature", "# of Outliers"))
+```
+
+From the output, the number of outliers for the numeric columns (especially after fixing `freight.cost` and `weight.kg`) relative to the total size of the dataset is moderate. Outliers will still be kept despite this because they are representative of real orders and item demand information. 
 
 ### Identifying Missing Values
 
-For this analysis, missing values include both NA and blank observations. These will be identified to gain an understanding of how practical use of those columns may be and to anticipate imputation techniques.
+Missing values, denoted NA, must be handled prior to modeling. A function is defined to return the number of missing values (if they exist) for each numeric feature. 
 
-```{r}
+```{r calc_missing, echo = FALSE}
 calc_missing <- function(x) {
   missing.val <- data.frame(
     col = names(x),
-    na.count = colSums(is.na(x)),
-    blank = colSums(x == "" | x == " ")
+    na.count = colSums(is.na(x))
   ) %>%
-    filter(na.count > 0 | blank > 0)
+    filter(na.count > 0)
   return(missing.val)
 }
+```
 
-kable(calc_missing(ship.df),
-      col.names = c("Feature", "# of Missing Values", "# of Blanks"),
+```{r MissingValues, echo = FALSE}
+kable(calc_missing(ship.df %>% select(-scheduled.delivery, -actual.delivery)),
+      col.names = c("Feature", "# of Missing Values"),
       row.names = FALSE)
 ```
 
-```{r}
-ggplot(ship.df, aes(x = line.item.value, y = total.cost, color = weight.kg)) + 
-  geom_point(show.legend = TRUE) +
-  scale_color_gradient(
-                       na.value = "red", guide = "legend") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
+There are a quite a lot of missing `weight.kg` values, though it is unlikely much can be done about this. Placeholder vales
 
-ggplot(ship.df, aes(x = line.item.value, y = total.cost, color = line.item.insurance.cost)) + 
-  geom_point(show.legend = TRUE) +
-  scale_color_gradient(low = "green", high = "red",
-                       na.value = "blue", guide = "legend") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
+### Categorical 
+
+Categorical variables represent non-numeric information that be divided into groups. For example, `delivery.late` contains two categories: yes or no. In R, categorical features can undergo a process called factoring in which categories are formally assigned as ordinal or nominal levels. This changes little in practice other than making it easier for prospective models to interpret the feature.
+
+A dataframe consisting only of categorical variables is defined to create key visuals regarding categorical variable relationships with `item.quantity`. The number of unique categories for each feature will also be checked as this provides an idea about how many predictors will be modelled. 
+
+```{r factor.df, echo = FALSE}
+factor.df <- ship.df %>%
+  select(where(is.factor))
 ```
 
+```{r calc_unique, echo = FALSE}
+calc_unique <- function(x) {
+  unique.values <- sapply(x, function(col) length(unique(col)))
+  unique.df <- data.frame(unique.values)
+  return(unique.df)
+}
+```
 
-### Characterizing Numeric Predictors
+```{r UniqueFactValues, echo = FALSE}
+kable(calc_unique(factor.df),
+      col.names = "# of Unique Values")
+```
 
+Many categories exist for `manufacturing.site`, `molecule.test.type`, and `vendor`. This is expected given what they represent, but should be noted as it will contribute to model training time later. 
 
+Key insights can be derived from visualizing item demand over time, particularly the average item demand on a monthly and yearly scale.
 
+```{r MonthlyDemand, echo = FALSE}
+# Monthly Demand
+qty.month <- ship.df %>%
+  group_by(delivery.month) %>%
+  summarize(avg.qty = sum(item.quantity))
 
-### Characterizing Categorical Predictors
+ggplot(qty.month, aes(delivery.month, avg.qty, group = 1)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    x = "Month",
+    y = "Average Item Quantity",
+    title = "Average Monthly Order Demand",
+    caption = "Figure 1: Average monthly item quantity ordered between 2006 and 2015."
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
 
+```{r OverallDemand, echo = FALSE}
+# Yearly Demand
+qty.year <- ship.df %>%
+  group_by(delivery.year) %>%
+  summarize(avg.qty = sum(item.quantity))
 
+ggplot(qty.year, aes(delivery.year, avg.qty, group = 1)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    x = "Year",
+    y = "Average Item Quantity",
+    title = "Average Order Demands Over Time",
+    caption = "Figure 2: Average item quantity per order between 2006 and 2015."
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
 
-### Correlation
+There does appear to be some monthly spikes in March, June, and September. On a yearly scale, average item quantities increased between 2006 and 2015.
+
+The product breakdown can be observed according to the region of the world items are shipped to.
+
+```{r RegionProduct, echo = FALSE}
+regiondemand <- ggplot(ship.df, aes(region, item.quantity, fill = product)) +
+  geom_bar(stat = "identity", position = position_fill(), width = 0.5) +
+  labs(
+    x = "Region",
+    y = "Average Item Quantity",
+    fill = "Product Classification",
+    title = "Average Region Item Demand",
+    caption = "Figure 3: Average item quantity ordered by region between 2006 and 2015 colored by product type."
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5)) +
+  scale_fill_paletteer_d("palettetown::kirlia")
+```
+
+Tablets are the most common dosage form ordered and account for around `r round(nrow(ship.df %>% filter(product == "Regular FDC Tablet" | product == "Regular Tablet")) / nrow(ship.df) * 100, 0)`% of all dosage types. 
+
+The specific types of items ordered can be viewed over time as well to understand if certain products drive demand more than others.
+
+```{r ProductDemand, echo = FALSE}
+qty.product <- ship.df %>% 
+  group_by(delivery.year, product) %>%
+  summarize(avg.qty = sum(item.quantity), .groups = "drop")
+
+ggplot(qty.product, aes(delivery.year, avg.qty, group = product, color = product)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    x = "Year",
+    y = "Average Item Quantity",
+    color = "Product Classification",
+    title = "Average Product Demand Over Time",
+    caption = "Figure 4: Average item quantity per order between 2006 and 2015 colored by product type."
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5)) +
+  scale_color_paletteer_d("palettetown::kirlia")
+```
+
+An extreme uptick in the average number of Regular FDC Tablets and Regular Tablets can be observed in Figure 4. The exact country, order year, and item quantity will be determined to further characterize these spikes.
+
+```{r CountryDemand, echo = FALSE}
+highest.country <- ship.df %>%
+  select(country, region, item.quantity, delivery.year) %>%
+  filter(region == "Africa") %>%
+  group_by(country, delivery.year) %>%
+  arrange(desc(item.quantity))
+
+kable(highest.country[1:10, ],
+      col.names = c("Country", "Region", "Item Quantity", "Delivery Year"),
+      align = "c")
+```
+
+Considering most order quantities are around `r median(ship.df$item.quantity)`, these values are undoubtedly included in the outliers previously detected in Section 2.3. This is crucial, as these values skew the target significantly and are not representative of typical order demand. 
+
+Average order demand for these specific countries will be visualized over time.
+
+```{r, AfricaCountryDemand, echo = FALSE}
+africa.country <- suppressWarnings(ship.df %>%
+                                     filter(region == "Africa" &
+                                            country == c("Nigeria", "Zambia", "South Africa",
+                                                         "Mozambique", "Zimbabwe", "Tanzania")) %>%
+                                     group_by(delivery.year, country) %>%
+                                     summarize(avg.qty = sum(item.quantity), .groups = "drop"))
+ 
+ggplot(africa.country, aes(delivery.year, avg.qty, group = country, color = country)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    x = "Year",
+    y = "Average Item Quantity",
+    color = "Country",
+    title = "Average High-Demand Country Item Quantity",
+    caption = "Figure 5: Average item quantity ordered by high-demand African countries between\n2006 and 2015 colored by product type."
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.title.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.4)) +
+  scale_color_paletteer_d("ggthemes::excel_Main_Event")
+```
+
+Clearer spike patterns are evident here compared to Figure 4. These countries had great demand for certain products between 2011 and 2015, especially South Africa and Zambia.
+
+Product classification will be viewed for these countries to confirm tablets were most commonly ordered. 
+
+```{r HighDemandYrs, echo = FALSE}
+high.demand.yrs <- suppressWarnings(ship.df %>%
+  filter(region == "Africa" &
+         country == c("Nigeria", "Zambia", "South Africa",
+                      "Mozambique", "Zimbabwe", "Tanzania"),
+         delivery.year == "2011" | delivery.year == "2012" |
+         delivery.year == "2013" | delivery.year == "2014" | 
+         delivery.year == "2015") %>%
+  group_by(delivery.year, product) %>%
+  summarise(avg.qty = sum(item.quantity), .groups = "drop"))
+
+ggplot(high.demand.yrs, aes(delivery.year, avg.qty, fill = product)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.5, color = "black") +
+  labs(x = "Region",
+       y = "Average Item Quantity",
+       fill = "Product Classification",
+       title = "High-Demand Country Average Item Quantity by Product",
+       caption = "Figure 6: Average item quantity among high-demand countries between 2011 and 2015 colored by product type.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.1, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.3)) +
+  scale_fill_paletteer_d("palettetown::kirlia")
+```
+
+Tablets were overwhelmingly the most common item ordered during high-demand years. The effect of this extreme spike in item quantity will likely effect how the target values are skewed.
+
+### Numeric Distributions
+
+Numeric values will be evaluated according to their relationship with the target variables, in addition to their individual distributions.
+
+* `weight.kg`
+* `unit.price`
+* `pack.price`
+* `line.item.value`
+* `item.quantity`
+* `delivery.lag`
+* `freight.cost`
+* `unit.of.measure.per.pack`
+
+```{r PivotHistogram, echo = FALSE}
+piv.num1 <- pivot_longer(cols = c("weight.kg", "item.insurance.cost", "freight.cost"),
+                        data = num.df,
+                        names_to = "Features",
+                        values_to = "Values")
+
+piv.num2 <- pivot_longer(cols = c("line.item.value", "item.quantity"),
+                        data = num.df,
+                        names_to = "Features",
+                        values_to = "Values")
+
+piv.num3 <- pivot_longer(cols = c("unit.price", "pack.price"),
+                        data = num.df,
+                        names_to = "Features",
+                        values_to = "Values")
+```
+
+```{r Histograms, echo = FALSE}
+ggplot(piv.num1, aes(Values)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  facet_wrap(~ Features, scales = "free") +
+  theme_minimal() +
+  labs(x = NULL,
+       y = "Count",
+       caption = "Figure 7: Value distributions of item weight, freight cost, and insurance cost.") +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+
+ggplot(piv.num2, aes(Values)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  facet_wrap(~ Features, scales = "free") +
+  labs(x = NULL,
+       y = "Count",
+       caption = "Figure 8: Value distributions of item cost and quantity") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+
+ggplot(piv.num3, aes(Values)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  facet_wrap(~ Features, scales = "free") +
+  labs(x = NULL,
+       y = "Count",
+       caption = "Figure 9: Value distributions of unit and pack price") +
+  theme_minimal() +
+    theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+All of the predictors exhibit a right positive skew. Q-Q plots can reveal how the value distributions compare to that of a theoretical normal distribution. A normal distribution is characterized by most values falling near the average, or mean.
+
+```{r PivotQQ, echo = FALSE}
+piv.qq <- num.df %>%
+  select(-unit.of.measure.per.pack) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Features",
+               values_to = "Values")
+```
+
+```{r QQPlot, echo = FALSE}
+ggplot(piv.qq, aes(sample = Values)) +
+  facet_wrap(~ Features, scales = "free") +
+  geom_qq() +
+  geom_qq_line(color = "red") +
+  labs(title = "Q-Q by Feature",
+       x = "Theoretical Quantiles",
+       y = "Sample Quantiles",
+       caption = "Figure 10: Q-Q plots of numeric features plotting theoretical vs. actual quantiles.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+There appears to be significant deviations from normality for all the continuous numeric features. Some models do not assume data to be normally distributed, though knowing how values are distributed helps when interpreting model outcomes or engineering features according to distribution tendencies. 
+
+### Correlations
+
+Correlation coefficients reveal the strength and direction of any linear relationship numeric predictors may have with the target. For example, coefficients larger than 0.7 and up to 1 indicate a strong, positive linear relationship. Coefficients below -0.7 up to -1 indicate a strong, negative linear relationship. Coefficients close to 0 indicate no linear relationship, though this does not necessarily mean there is no relationship at all between the variables, just that it is not linear. 
+
+```{r Correlations, echo = FALSE}
+round(cor(num.df, method = "pearson"), 2)
+```
+
+The target `item.quantity` and `line.item.value` have a strong, positive relationship denoted by a coefficient of 0.84. This is expected given the price of an item undoubtedly scales with the quantity of the item purchased. The only other strong correlations with `item.quantity` are with `item.insurance.cost` and `weight.kg`, more features that can be derived from quantity. 
+
+It is important to identify potential correlations between predictors that will be used to train a model because their strong inter-correlations can obscure training performance. Highly correlated predictors are usually removed beforehand. This won't be necessary for the prior mentioned features due to their automatic exclusion from model training due to `item.quantity` being able to be mathematically derived from them.
+
+### Linear Relationships
+
+Linear relationships revealed by the correlation analysis can be visualized by plotting the the predictors against the target.
+
+```{r LinearPiv, echo = FALSE}
+piv.lin <- pivot_longer(cols = -item.quantity,
+                        data = num.df,
+                        names_to = "Features",
+                        values_to = "Values")
+```
+
+```{r ScatterPlots, echo = FALSE}
+ggplot(piv.lin, aes(Values, item.quantity)) +
+  facet_wrap(~ Features, scales = "free") +
+  geom_point() +
+  geom_smooth(method = "lm", formula = 'y ~ x') +
+  labs(
+    x = "Predictor Values",
+    y = "Line Item Quantity",
+    title = "Linear Relationships with Line Item Quantity",
+    caption = "Figure 11: Scatterplots of numeric predictors plotted against line item quantity with a linear overlay."
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+`line.item.value`, `item.insurance.cost`, and `freight.cost` have strong linear correlations with the target, which makes sense given item quantity undoubtedly scales with order costs as previously seen. 
 
 ```{r}
-ship.num.df <- ship.df %>%
-  select(where(is.numeric)) %>%
-  na.omit()
+ship.df <- ship.df %>% na.omit()
+
+write.csv(ship.df, file = "global_lab_supply.csv")
 ```
 
 ---
@@ -255,29 +816,856 @@ ship.num.df <- ship.df %>%
 
 ### Select Predictive Features
 
-Based on the data dictionary, it is evident many variables in this dataset are irrelevant to predicting total procurement cost. Those variables are as follows:
+Based on the data dictionary, it is evident many variables in this dataset are irrelevant to predicting item demand. Those variables are as follows:
 
-* `id` - A unique key assigned to each row
-* `project.code` - A unique PEPFAR identifying code
-* `pq` - Price quote number
-* `asn.dn` - Shipment number
-* `delivery.recorded.date` - Date in which a delivery date was recorded into the SCMS information system, which is irrelevant as the actual delivery date is already defined separately
+* `id` 
+* `project.code` 
+* `pq`
+* `po.so` 
+* `asn.dn` 
+* `item.description` 
+* `delivery.recorded.date`
+* `pq.first.sent.to.client.date` 
+* `po.sent.to.vendor.date`
+* `first.line.designation`
 
+Two of the more generic engineered features will also be excluded as they are just broader categorizations of existing features:
 
-### Imputing Missing Values
+* `product`
+* `region`
+
+Alternatively, there are multiple features that directly contribute to quantity:
+
+* `line.item.value` - Directly calculated from item quantity
+* `item.insurance.cost.cost` - Presumed to be related to item quantity
+* `weight.kg` - Directly dependent on item quantity
+* `freight.cost` - Likely directly dependent on item quantity
+* `shipment.mode` - Likely directly dependent on item quantity
+
+The reason these features cannot be included is because any prospective model can "backwards engineer" these features to predict item quantity. This would artificially inflate model performance because item demand can just be directly derived from these features. Additionally, this analysis presumes that demand is not yet known for a particular order, so these features would not yet be derived anyways. 
+
+These features will be excluded during modeling as they are not useful for the analysis goal.
 
 ```{r}
-wt.na <- ship.df %>%
-  filter(!is.na(weight.kg))
-
-wt.na.rmv <- ship.df %>%
-  filter(is.na(weight.kg))
-
-wt.model <- lm(weight.kg ~ .,
-               data = wt.na.rmv)
-summary(wt.model)
+model.df <- ship.df %>%
+  select(-id, -project.code, -pq, -asn.dn, -po.so,
+         -item.description, -delivery.recorded.date,
+         -pq.first.sent.to.client.date, -po.sent.to.vendor.date,
+         -region, -line.item.value, -item.insurance.cost,
+         -weight.kg, -scheduled.delivery, -actual.delivery, -freight.cost,
+         -pack.price, -unit.price, -shipment.mode, -first.line.designation,
+         -product, -manufacturing.site)
 ```
 
-### Feature Engineering
+### Dropping Missing Values 
 
+None of the features containing missing values will be used to train the model, so the remaining missing values will need to be imputed.
 
+### Outlier Handling
+
+As stated previously, outliers will remain in the dataset as they are representative of real item demand. 
+
+```{r, eval = FALSE, include = FALSE}
+rmv_outlier <- function(x) {
+  q1 <- quantile(x, probs = 0.25)
+  q3 <- quantile(x, probs = 0.75)
+  IQR <- q3 - q1
+  outlier <- which(x < q1 - (IQR * 1.5) | x > q3 + (IQR * 1.5))
+  if (length(outlier) > 0) {
+    return(outlier)
+  }
+}
+
+#outlier.rows <- unlist(sapply(num.df, rmv_outlier))
+#model.df <- model.df[-outlier.rows, ]
+```
+
+---
+
+## Modeling
+
+### Modeling Approach
+
+The target variable has an extreme range of `r min(model.df$item.quantity)`-`r max(model.df$item.quantity)`. It was observed that many numeric predictors and the target are heavily skewed and thus deviate from normality. This means most of the values fall between a certain range, with sparser more extreme values extending far outside the majority range.
+
+Predictors are a mix of factors and numeric data types, with some factors containing many levels. It is not known what kind of relationship the predictors may have with the target, so models that make no assumptions about value distributions (non-parametric) must be robust to derive meaningful predictions. Three initial models will be trained:
+
+* Classification and Regression Tree (CART) - Non-parametric decision tree
+* Multivariate Adaptive Regression Splines (MARS) - Non-parametric regression technique
+* Random Forest - Non-parametric bagged decision trees
+
+Decision trees encompass many rule-based algorithms. When training a model, the decision tree takes the training data and splits it based on the values of each predictive feature. The tree is built branching off by splitting features according to which split it tests yields the lowest predictive error.
+
+MARS models, on the other hand, can be thought of as a flexible extension of a linear regression. It fits linear segments in a piecewise fashion in an effort to capture non-linear patterns in the data.
+
+A modeling method known as bootstrap aggregation, or bagging, can be applied to these two baseline models to fit multiple versions of a model and combines the fits into a single prediction to improve results. Random forests are in of themselves an example of a bagged model; that is, it is actually many decision tree models that have been bagged.
+
+The ultimate goal is to then take these bagged models and combine them using a technique called stacking. A meta-learner (another machine learning algorithm) is trained using the bagged models to obtain the best possible predictive power. The final model is referred to as a stacked ensemble as it features three different bagged models. A final schematic of how models will be trained, bagged, and stacked is shown below.
+
+```{r ModelSchematic, echo = FALSE}
+DiagrammeR::grViz("digraph {
+
+graph [layout = dot, rankdir = TB]
+
+# define the global styles of the nodes. We can override these in box if we wish
+node [shape = rectangle, style = filled]
+
+base1 [label = 'CART', fillcolor = LightBlue]
+base2 [label = 'MARS', fillcolor = LightBlue]
+base3 [label =  'Random Forest', fillcolor = LightBlue]
+hom1 [label = 'Bagged CART', fillcolor = PaleGreen]
+hom2 [label = 'Bagged MARS', fillcolor = PaleGreen]
+hom3 [label = 'Bagged Random Forest', fillcolor = PaleGreen]
+final [label = 'Stacked Ensemble', fillcolor = LightPink]
+
+# edge definitions with the node IDs
+base1  -> hom1 -> final
+base2 -> hom2 -> final
+base3 -> hom3 -> final
+}")
+```
+
+### Spitting Training and Testing
+
+Before building a model to predict item quantities, the original cleaned dataset must be split into training, testing, and validation subsets. The training dataset is comprised of 70% of the original dataset and is what the models will train on to learn patterns in the data that allow it to make predictions. The validation dataset will make up 15% of the original dataset and is used to test model performance as they are trained. The testing dataset comprises the rest of the 15% of the dataset and is not used until the final model is trained to see how well the ensemble performs on completely unseen data. This breakdown is outlined below.
+
+```{r SplitSchematic, echo = FALSE}
+DiagrammeR::grViz("digraph {
+
+graph [layout = dot, rankdir = TB]
+
+# define the global styles of the nodes. We can override these in box if we wish
+node [shape = rectangle, style = filled]
+
+original [label = 'Original Dataset', fillcolor = LightBlue]
+training [label = 'Training Data\n(70%)', fillcolor = PaleGreen]
+remaining [label =  'Remaining Data\n(30%)', fillcolor = PaleGreen]
+test [label = 'Test Data\n(15%)', fillcolor = Beige]
+val [label = 'Validation Data\n(15%)', fillcolor = Beige]
+
+# edge definitions with the node IDs
+original  -> training
+original -> remaining -> {test val}}")
+```
+
+```{r SplitData, echo = FALSE}
+train.rows <- createDataPartition(model.df$item.quantity, p = 0.7, list = FALSE)
+
+train70x <- model.df[train.rows, ]
+testval <- model.df[-train.rows,]
+
+remaining.rows <- createDataPartition(testval$item.quantity, p = 0.5, list = FALSE)
+
+val15x <- testval[remaining.rows, ]
+test15x <- testval[-remaining.rows, ]
+```
+
+### Base Model Training & Evaluation
+
+The initial CART, MARS, and Random Forest models are trained using `caret`, a specialized R library for standardized streamlining of machine learning tasks. Two key `caret` functions that will be consistently utilized to train the models are listed below:
+
+* `train()` - Defines the parameters for the regression model training.
+* `trainControl()` - Allows for customization of computational nuances that can be passed to `train()`.
+
+Numeric predictors were previously observed to be highly skewed, so some pre-processing will need to be performed. This includes applying what is called a feature transformation, which attempts to normalize features. This is not always necessary for all types of models, but the transformation will be applied to all of them anyways to ensure consistency. The transformation method used is called `"BoxCox"` and is more powerful than other transformation approaches, like simply taking the square root of all the feature values. Additionally, features will be scaled to operate within the same range for consistency purposes using `"center"` and `"scale"`. Finally, a method called `"nzv"`" will be called, which stands for "Non-Zero Variance". This means any predictive values that introduce little variability into training will be removed as they offer no useful information for making predictions. 
+
+The three baseline models will be trained to assess initial performance. 
+
+```{r CPUCoreAllocation, echo = FALSE}
+num.cores <- parallel::detectCores(logical = TRUE) 
+cl <- makePSOCKcluster(max(1, num.cores - 2))
+registerDoParallel(cl)
+```
+
+```{r BaseTrainCTRL, echo = FALSE}
+train.ctrl <- trainControl(method = "cv",
+                           number = 3,
+                           savePredictions = TRUE,
+                           verboseIter = TRUE,
+                           allowParallel = TRUE)
+```
+
+```{r BaseCART, echo = FALSE}
+set.seed(100)
+cart <- suppressWarnings(train(item.quantity ~ .,
+              data = train70x,
+              method = "rpart",
+              preProcess = c("BoxCox", "center", "scale", "nzv"),
+              trControl = train.ctrl))
+```
+
+```{r BaseMARS, echo = FALSE}
+set.seed(200)
+
+mars <- suppressWarnings(train(item.quantity ~ .,
+              data = train70x,
+              method = "earth",
+              preProcess = c("BoxCox", "center", "scale", "nzv"),
+              trControl = train.ctrl))
+```
+
+```{r BaseRF, echo = FALSE}
+set.seed(300)
+
+base.rf <- suppressWarnings(train(item.quantity ~ .,
+                 data = train70x,
+                 method = "rf",
+                 ntree = 50,
+                 trControl = train.ctrl,
+                 preProcess = c("BoxCox", "center", "scale", "nzv")))
+```
+
+A function is defined to derive the optimal version of each model that was trained. Evaluating regression models requires consideration of multiple calculated metrics:
+
+* Mean Squared Error (MSE) - The sum of the difference between each of the model's predicted and actual values divided by the total number of observations and squared.
+* Root Mean Squared Error (RMSE) - The square root of MSE on the original scale of the target feature.
+* RMSE Standard Deviation (RMSE SD) - Error deviation across different model splits.
+* Mean Absolute Error (MAE) - Average absolute difference between predicted and actual values.
+* Mean Absolute Percentage Error (MAPE) - Average absolute percent difference between predicted and actual values.
+* $R^2$ - Measures proportion of variation in the data accounted for by the model.
+* $R^2$ Standard Deviation ($R^2$SD) - $R^2$ deviation across different folds.
+* Complexity Parameter (CP) - Threshold value for pruning decision trees.
+* Degree - Measure of complexity between predictors in a MARS model.
+* Number of Prunes (nprune) - Measure of removal for piecewise functions in a MARS model.
+* Random Variable Sampling (mtry) - Number of predictors a random forest model considers when making splits to build a tree.
+
+When models are trained, `caret` automatically employs a technique called cross validation, in which the training data is further split up into "folds" and multiple models are trained on each fold. A portion of the fold is reserved for testing. For example, in 5-fold cross validation, 5 models are trained on 5 different folds of the training data, and each time a different portion of each fold is tested on. 
+
+RMSE is one of the most valuable metrics for assessing regression model performance. While a lower RMSE tends to be better, there is no universal "good" RMSE as it depends on the original scale of the predicted data values. The initial model results are outputted in a table below. Parameters not applicable to a particular model have `NA` values. 
+
+```{r get_best_result, echo = FALSE}
+get_best_result = function(model) {
+  best = which(rownames(model$results) == rownames(model$bestTune))
+  best.result = model$results[best, ]
+  rownames(best.result) = NULL
+  return(best.result)
+}
+```
+
+```{r BaseModelMetrics, echo = FALSE}
+base.model.results <- bind_rows(get_best_result(cart),
+                                get_best_result(mars),
+                                get_best_result(base.rf))
+
+base.model.results <- sapply(base.model.results, function(x) round(x, 2)) %>% as.data.frame()
+
+row.names(base.model.results) <- c("CART", "MARS", "Random Forest")
+
+kable(base.model.results,
+      caption = "Base Model Results")
+```
+
+As previously stated, `item.quantity` has an extreme range, meaning the difference between the highest item quantity and lowest item quantity is quite large. The RMSE of the base models must be interpreted with this in mind. It can be helpful to normalize the RMSE by dividing it by the target's range to view on a scale from 0-1. Some additional target statistics will be evaluated in comparison with the RMSE:
+
+* Median - The most common item quantity ordered.
+* Mean - The average amount of items ordered.
+* Standard Deviation - Average distance of data points from the mean.
+
+```{r, BaseCompare, echo = FALSE}
+base.target.compare <- data.frame(Range = max(train70x$item.quantity) - min(train70x$item.quantity),
+                                  Median = median(train70x$item.quantity),
+                                  Mean = mean(train70x$item.quantity),
+                                  SD = sd(train70x$item.quantity),
+                                  RMSE = base.model.results$RMSE,
+                                  NormRMSE = sapply(base.model.results$RMSE,
+                                                    function(x) round(x / (max(train70x$item.quantity) - min(train70x$item.quantity)),2) * 100))
+  
+row.names(base.target.compare) <- c("CART", "MARS", "Random Forest")
+
+kable(base.target.compare,
+      col.names = c("Range", "Median", "Mean", "SD", "RMSE", "Normalized RMSE"),
+      caption = "Base Model Target Comparison")
+```
+
+The target has a median value of just 3,000 compared to the RMSE of all three models which is 10x as high. This suggests errors are quite large when predicting typical order sizes. Some extreme values exist in `item.quantity`, though even after previous outlier detection and testing model performance without outliers it was found not to change performance much, so outliers were re-incorporated. 
+
+Normalized RMSE show errors are very small relative to the mean (5-6%), though this can be attributed to the target's skewness.  
+
+Before drawing any conclusions, ensuring none of the models are overfitting is paramount to determining how to proceed. The validation dataset can now be used to assess model performance until the final ensemble is trained. This is done by allowing each model to make predictions for `item.quantity` by passing the validation dataset. Resulting RMSE values between training and validation are compared below.
+
+```{r BaseCARTPred, echo = FALSE}
+cart.pred <- predict(cart, newdata = val15x)
+actual <- val15x$item.quantity
+
+rmse.cart <- sqrt(mean((actual - cart.pred)^2))
+mae.cart <- mean(abs(actual - cart.pred))
+mape.cart <- mean(abs(actual - cart.pred) / actual) * 100
+```
+
+```{r BaseMARSPred, echo = FALSE}
+mars.pred <- predict(mars, newdata = val15x)
+
+rmse.mars <- sqrt(mean((actual - mars.pred)^2))
+mae.mars <- mean(abs(actual - mars.pred))
+mape.mars <- mean(abs(actual - mars.pred) / actual) * 100
+```
+
+```{r BaseRFPred, echo = FALSE}
+rf.pred <- predict(base.rf, newdata = val15x)
+
+rmse.rf <- sqrt(mean((actual - rf.pred)^2))
+mae.rf <- mean(abs(actual - rf.pred))
+mape.rf <- mean(abs(actual - rf.pred) / actual) * 100
+```
+
+```{r BaseFitCheck, echo = FALSE}
+check.fit <- data.frame(train.rmse = c(base.model.results$RMSE[1], base.model.results$RMSE[2], base.model.results$RMSE[3]),
+                        val.rmse = c(rmse.cart, rmse.mars, rmse.rf),
+                        row.names = c("CART", "MARS", "Random Forest"))
+
+kable(check.fit,
+      col.names = c("Train RMSE", "Validation RMSE"),
+      caption = "Base Model Validation Performance")
+``` 
+
+None of the models, when provided the validation dataset, appear to be overfitting. This is good, as it means the models are not learning the training dataset "too well".
+
+Model performance can be visualized in many ways, but one of the most straightforward is to look at the distribution of the model residuals, or the difference between the predicted and actual values.
+
+```{r BaseCARTResiduals, echo = FALSE}
+ggplot(cart$pred, aes(obs - pred)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  geom_rug() +
+  labs(x = "Residuals",
+       y = "Count",
+       title = "Base CART Residual Distribution",
+       caption = "Figure 12: Distribution of base CART model residual values.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+```{r BaseMARSResiduals, echo = FALSE}
+ggplot(mars$pred, aes(obs - pred)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  geom_rug() +
+  labs(x = "Residuals",
+       y = "Count",
+       title = "Base MARS Residual Distribution",
+       caption = "Figure 13: Distribution of base MARS model residual values.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+```{r BaseRFResiduals, echo = FALSE}
+ggplot(base.rf$pred, aes(obs - pred)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  geom_rug() +
+  labs(x = "Residuals",
+       y = "Count",
+       title = "Random Forest Residual Distribution",
+       caption = "Figure 14: Distribution of base random forest model residual values.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+Residual distribution should ideally center around 0, as this symmetry indicates the actual and predicted values are cancelling one another out. It appears residuals are most centered in the random forest model, but all three show slight right positive skews, indicative of the target feature being skewed heavily. 
+
+Finally, variable importance will be checked to gain an understanding on how the models are weighing the features while predicting `item.quantity`. 
+
+```{r BaseVarImp, echo = FALSE}
+var.cart <- varImp(cart)$importance %>% arrange(desc(Overall)) %>% mutate(Overall = round(Overall, 0)) %>% head(5)
+var.mars <- varImp(mars)$importance %>% arrange(desc(Overall)) %>% mutate(Overall = round(Overall, 0)) %>% head(5)
+var.rf <- varImp(base.rf)$importance %>% arrange(desc(Overall)) %>% mutate(Overall = round(Overall, 0)) %>% head(5)
+
+kable(var.cart,
+      col.names = c("Feature", "Contribution"),
+      caption = "Base CART Feature Importance")
+
+kable(var.mars,
+      col.names = c("Feature", "Contribution"),
+      caption = "Base MARS Feature Importance")
+
+kable(var.rf,
+      col.names = c("Feature", "Contribution"),
+      caption = "Base Random Forest Feature Importance")
+```
+
+All three models exhibited similar feature importance weighing for the top contributor, which is tablet dosage. `countryZambia` and `countrySouthAfrica` are both heavily considered for predicting `item.quantity`, which is unsurprising given previous trends showing spikes in item demand in Section 2.5. Product sub-classification is also weighed heavily for CART, brand for MARS, and even `delivery.year2015` for random forest. `delivery.year2011` appears for MARS as 5th most important.. 
+
+While performance is not optimal due to variance not being explained, it is not horrible either. The findings are consistent with previous findings in Section 2.5.
+
+### Base Model Tuning & Follow-Up Evaluation
+
+`caret` provides bagging options for both CART and MARS models: `treebag` and `bagEarthGCV`, respectively. `treebag` does not provide hyperparameter tuning options, but `bagEarthGCV` does. These two base models will be bagged now as part of the tuning process because tuning `rpart` and `earth`, their base methods, ultimately won't be used in the final model. 
+
+Unlike before, the tuning and bagging of these models will occur at once inside of a function called `caretList()`. This will make it easier to pass to `caretEnsemble`, the function that will stack and produce the final model, later. 
+
+After initial evaluation metrics, train controls will be assigned to each base model according to individual model specifications. A custom tuning grid is defined to allow for specialized control over each model's parameters:
+
+* CART - `treebag` has no tuning parameters, but we can increase cross-fold validations to 5 and 10 instead of 3 to see which improves performance. 
+* MARS - `bagEarthGCV` allows for adjustments to `nprune`, so a tuning grid is defined to test a range of values to find the optimal value. is limited to one value, so the tuned model will try multiple values to see where the best performance lies. The base model fit with `nprune=``r mars$bestTune[ ,1]`, so this range will be explored. 
+* Random Forest - `caret` specifies a default tree count of `ntree = 500`, but this can get computationally intensive with this dataset due to the larger number of predictors. `ntree = 50` will have to suffice for the tuned model as well. `mtry` can be adjusted to a specific range to identify the optimal value, which was previously found to be `mtry=``r base.rf$results$mtry[3]`. This range will be explored.
+
+Two different bagged model groups will be trained to optimize cross-validation with `k = 10` or `k = 15`.
+
+```{r caretListParams, echo = FALSE}
+rf.grid <- expand.grid(mtry = seq(350, 450, by = 10))
+mars.grid <- expand.grid(nprune = 20:30)
+
+tuneList <- list(caretModelSpec(method = "rf",
+                                tuneGrid = rf.grid,
+                                ntree = 50),
+                 treebag = caretModelSpec(method = "treebag"), 
+                 bagEarthGCV = caretModelSpec(method = "bagEarthGCV"))
+```
+
+```{r Bagging1, echo = FALSE}
+train.ctrl1 <- trainControl(method = "cv", # default k = 10
+                            savePredictions = TRUE,
+                            verboseIter = TRUE,
+                            allowParallel = TRUE)
+
+bag.models1 <- suppressWarnings(caretList(item.quantity ~ .,
+                         data = train70x,
+                         tuneList = tuneList,
+                         trControl = train.ctrl1,
+                         preProcess = c("BoxCox", "center", "scale", "nzv")))
+```
+
+```{r Bagging2, echo = FALSE}
+train.ctrl2 <- trainControl(method = "cv",
+                            number = 15,
+                            savePredictions = TRUE,
+                            verboseIter = TRUE,
+                            allowParallel = TRUE)
+
+bag.models2 <- suppressWarnings(caretList(item.quantity ~ .,
+                         data = train70x,
+                         tuneList = tuneList,
+                         trControl = train.ctrl2,
+                         preProcess = c("BoxCox", "center", "scale", "nzv")))
+```
+
+```{r BaggedModel1, echo = FALSE}
+cart.tune1 <- bag.models1$treebag
+mars.tune1 <- bag.models1$bagEarth
+rf.tune1 <- bag.models1$rf
+
+tune.model.results1 <- bind_rows(get_best_result(cart.tune1),
+                                 get_best_result(mars.tune1),
+                                 get_best_result(rf.tune1))
+
+row.names(tune.model.results1) <- c("CART", "MARS", "Random Forest")
+
+tune.model.results1 <- tune.model.results1 %>% select(-parameter)
+
+kable(tune.model.results1,
+      caption = ("First Bagged Model Results (k = 10)"))
+```
+
+```{r BaggedModel2, echo = FALSE}
+cart.tune2 <- bag.models2$treebag
+mars.tune2 <- bag.models2$bagEarth
+rf.tune2 <- bag.models2$rf
+
+tune.model.results2 <- bind_rows(get_best_result(cart.tune2),
+                                 get_best_result(mars.tune2),
+                                 get_best_result(rf.tune2))
+
+row.names(tune.model.results2) <- c("CART", "MARS", "Random Forest")
+
+tune.model.results2 <- tune.model.results2 %>% select(-parameter)
+
+kable(tune.model.results2,
+      caption = ("Second Bagged Model Results (k = 15)"))
+```
+
+Increased cross validations did not appear to improve performance by much for either bagged model groups, but the second bagging was slightly better, so it will be used moving forward. 
+
+Previously evaluated metrics will be checked again for the bagged models, including visualizations, RMSE, and $R^2$ values. 
+
+```{r TuneTargetCompare, echo = FALSE}
+tune.target.compare <- data.frame(Range = max(train70x$item.quantity) - min(train70x$item.quantity),
+                                  Median = median(train70x$item.quantity),
+                                  Mean = mean(train70x$item.quantity),
+                                  SD = sd(train70x$item.quantity),
+                                  TuneRMSE = tune.model.results2$RMSE,
+                                  BaseRMSE = base.model.results$RMSE,
+                                  NormRMSE = sapply(tune.model.results2$RMSE,
+                                                    function(x) round(x / (max(train70x$item.quantity) - min(train70x$item.quantity)),2) * 100))
+  
+row.names(tune.target.compare) <- c("CART", "MARS", "Random Forest")
+
+kable(tune.target.compare,
+      col.names = c("Range", "Median", "Mean",
+                    "SD", "Tuned RMSE", "Base RMSE",
+                    "Normalized RMSE"),
+      caption = "Tuned Model Target Comparison")
+```
+
+```{r TuneCARTPred, echo = FALSE}
+cart.pred <- predict(cart.tune2, newdata = val15x)
+
+rmse.cart.tune <- sqrt(mean((actual - cart.pred)^2))
+mae.cart.tune <- mean(abs(actual - cart.pred))
+mape.cart.tune <- mean(abs(actual - cart.pred) / actual) * 100
+```
+
+```{r TuneMARSPred, echo = FALSE}
+mars.pred <- predict(mars.tune2, newdata = val15x)
+
+rmse.mars.tune <- sqrt(mean((actual - mars.pred)^2))
+mae.mars.tune <- mean(abs(actual - mars.pred))
+mape.mars.tune <- mean(abs(actual - mars.pred) / actual) * 100
+```
+
+```{r TuneRFPred, echo = FALSE}
+rf.pred <- predict(rf.tune2, newdata = val15x)
+
+rmse.rf.tune <- sqrt(mean((actual - rf.pred)^2))
+mae.rf.tune <- mean(abs(actual - rf.pred))
+mape.rf.tune <- mean(abs(actual - rf.pred) / actual) * 100
+```
+
+```{r TuneFitCheck, echo = FALSE}
+check.fit <- data.frame(train.rmse = c(tune.model.results2$RMSE[1], tune.model.results2$RMSE[2], tune.model.results2$RMSE[3]),
+                        val.rmse = c(rmse.cart, rmse.mars, rmse.rf),
+                        row.names = c("CART", "MARS", "Random Forest"))
+
+kable(check.fit,
+      col.names = c("Train RMSE", "Validation RMSE"),
+      caption = "Tuned Model Validation Performance")
+``` 
+
+```{r TuneCARTResiduals, echo = FALSE}
+ggplot(cart.tune2$pred, aes(obs - pred)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  geom_rug() +
+  labs(x = "Residuals",
+       y = "Count",
+       title = "Tuned CART Residual Distribution",
+       caption = "Figure 15: Distribution of tuned CART model residual values.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+```{r TuneMARSResiduals, echo = FALSE}
+ggplot(mars.tune2$pred, aes(obs - pred)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  geom_rug() +
+  labs(x = "Residuals",
+       y = "Count",
+       title = "Tuned MARS Residual Distribution",
+       caption = "Figure 16: Distribution of tuned MARS model residual values.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+```{r TuneRFResiduals, echo = FALSE}
+ggplot(rf.tune2$pred, aes(obs - pred)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  geom_rug() +
+  labs(x = "Residuals",
+       y = "Count",
+       title = "Tuned Random Forest Residual Distribution",
+       caption = "Figure 17: Distribution of tuned random forest model residual values.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+RMSE values decreased overall, in addition to value dispersal centering around zero improving. $R^2$ values are also higher, though sub-optimal. Performance overall is improving, so the bagged models will be stacked to form an ensemble model. 
+
+### Heterogeneous Meta-Learner
+
+To create the final model, `caretStack()` is used to stack the previously trained models in an attempt to optimize performance. A function is defined to train multiple meta-learners with different algorithms to determine which has the lowest RMSE, which is returned.
+
+A meta-learner refers to an algorithm that is employed to stack and train the ensemble. The function will employ multiple meta-learners and choose the one that produces the ensemble with the best performance. These meta-learners include a random forest, a general linear regression, and a gradient boosting tree.
+
+```{r train_ensemble, echo = FALSE}
+# take training data and list of models
+train_ensemble <- function(train.data, model.list) {
+  
+  # set broad training ctrl 
+  ensemble.ctrl <- trainControl(method = "cv",
+                                savePredictions = TRUE,
+                                allowParallel = TRUE)
+  
+  # algorithms
+  meta.list <- c("glm", "rf", "xgbTree")
+  # store RMSE values
+  meta.rmse <- data.frame(method = character(0),
+                          RMSE = numeric(0))
+  
+  for (algorithm in meta.list) {
+    ensemble.test <- suppressWarnings(caretStack(model.list,
+                                method = algorithm,
+                                trControl = ensemble.ctrl,
+                                metric = "RMSE"))
+    
+    
+    rmse <- min(ensemble.test$resamples$RMSE)
+    meta.rmse <- rbind(meta.rmse,
+                       data.frame(method = algorithm,
+                                  RMSE = rmse))
+  }
+  # select lowest RMSE model from df
+  best.algorithm <- meta.rmse[which.min(meta.rmse$RMSE), "method"]
+  
+  final.model <- suppressWarnings(caretStack(model.list,
+                            method = best.algorithm,
+                            trControl = ensemble.ctrl,
+                            metric = "RMSE"))
+  
+  return(final.model)
+}
+
+final.model <- train_ensemble(train70x, bag.models2)
+```
+
+---
+
+## Evaluation
+
+### Final Model Testing
+
+The testing dataset, which has remained unseen this entire training process, will now be used for the final model to make predictions on. 
+
+```{r FinalPredictions, echo = FALSE}
+final.pred <- predict(final.model, newdata = test15x)
+actual <- test15x$item.quantity
+
+rmse.final <- sqrt(mean((actual - final.pred$pred)^2))
+mae.final <- mean(abs(actual - final.pred$pred))
+mape.final <- mean(abs(actual - final.pred$pred) / actual) * 100
+```
+
+```{r FinalModelMetrics, echo = FALSE}
+final.model.results <- get_best_result(final.model$ens_model)
+
+kable(final.model.results,
+      caption = "Final Model Results")
+```
+
+```{r FinalTargetCompare, echo = FALSE}
+final.target.compare <- data.frame(Range = max(train70x$item.quantity) - min(train70x$item.quantity),
+                                   Median = median(train70x$item.quantity),
+                                   Mean = mean(train70x$item.quantity),
+                                   SD = sd(train70x$item.quantity),
+                                   RMSE = final.model.results$RMSE,
+                                   NormRMSE = sapply(final.model.results$RMSE,
+                                                    function(x) round(x / (max(train70x$item.quantity) - min(train70x$item.quantity)),2) * 100))
+  
+row.names(final.target.compare) <- c("Final Model")
+
+kable(final.target.compare,
+      col.names = c("Range", "Median", "Mean",
+                    "SD", "RMSE", "Normalized RMSE"),
+      caption = "Final Model Target Comparison")
+```
+
+```{r FinalFitCheck, echo = FALSE}
+check.fit <- data.frame(train.rmse = final.model.results$RMSE,
+                        val.rmse = rmse.final)
+
+kable(check.fit,
+      col.names = c("Train RMSE", "Validation RMSE"),
+      caption = "Final Model Validation Performance")
+``` 
+
+```{r FinalRFResiduals, echo = FALSE}
+ggplot(final.model$ens_model$pred, aes(obs - pred)) +
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  geom_rug() +
+  labs(x = "Residuals",
+       y = "Count",
+       title = "Final Model Residual Distribution",
+       caption = "Figure 18: Distribution of final model residual values.") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 13, margin = ggplot2::margin(t = 10, b = 5)),
+    axis.title.y = element_text(size = 13, margin = ggplot2::margin(r = 10)),
+    plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.caption.position = "plot",
+    plot.caption = element_text(face = "italic", size = 10, hjust = 0.5))
+```
+
+```{r FinalVarImp, echo = FALSE}
+var.final <- varImp(final.model$ens_model)$importance %>% arrange(desc(Overall)) %>% mutate(Overall = round(Overall, 0)) %>% head(10)
+
+kable(var.final,
+      col.names = c("Feature", "Contribution"),
+      caption = "Final Model Contributions")
+```
+
+```{r CompareModelRMSE, echo = FALSE}
+base.rmse <- c(rmse.cart, rmse.mars, rmse.rf)
+tune.rmse <- c(rmse.cart.tune, rmse.mars.tune, rmse.rf.tune)
+final.rmse <- c(final.model.results$RMSE)
+
+final.comparison1 <- data.frame(Base = base.rmse,
+                                Tuned = tune.rmse,
+                                Final = final.model$ens_model$results$RMSE)
+
+row.names(final.comparison1) <- c("CART", "MARS", "Random Forest")
+
+kable(final.comparison1,
+      caption = "RMSE Model Values")
+```
+
+```{r CompareModelR2, echo = FALSE}
+base.r2 <- c(mean(cart$results$Rsquared), mean(mars$results$Rsquared), mean(base.rf$results$Rsquared))
+tune.r2 <- c(mean(cart.tune2$results$Rsquared), mean(mars.tune2$results$Rsquared), mean(rf.tune2$results$Rsquared))
+final.r2 <- c(final.model.results$Rsquared)
+
+final.comparison2 <- data.frame(Base = base.r2,
+                                Tuned = tune.r2,
+                                Final = final.model$ens_model$results$Rsquared)
+
+row.names(final.comparison2) <- c("CART", "MARS", "Random Forest")
+
+kable(final.comparison2,
+      caption = "R-Squared Model Values")
+```
+
+### Conclusion
+
+The final ensemble model was found to have a RMSE of `r round(rmse.final, 2)` and a $R^2$ value of `r round(final.model$ens_model$results$Rsquared, 2)`. Testing data revealed no overfitting, which is a significant improvement. 
+
+Quite a few challenges were encountered in attempting to predict item quantity. 
+
+First, it is likely that some sacrifice in model performance occurred with certain predictive feature exclusions due to lack of information about the dataset and inner-workings of these supply chains. `shipment.mode` was excluded as a predictor due to fears it could have contributed to data leakage during model training; this remains true assuming `item.quantity` was the primary predictor for `shipment.mode`. However, it is possible that `shipment.mode` was determined independently based on external factors unknown to this analysis; for example, perhaps certain items are always air shipped regardless of `item.quantity`. These kind of speculations are endless. Ultimately, the choice to exclude certain predictors was in the interest of avoiding artificially inflating model performance.
+
+Second, it is clear that `item.quantity` was heavily skewed to its extreme range due to unusual demands by certain countries between 2011 and 2015. Figure 4 reveals that nearly all products had consistent demand between 2006 and 2015 until tablet demands skyrocketed between 2011 and 2015. This undoubtedly affected model performance as those extreme order quantities made it difficult to predict the vast majority of normal order quantities. This effect was also seen in how models weighed features for predictions; South Africa and Zambia alone accounted for significant item demand. It also explains why $R^2$ values never really improved during tuning or ensembling - there was simply too much variability. 
+
+Finally, the somewhat obscure background regarding the dataset led to inclusion of hundreds of dummy predictors that may or may not have been useful. For example, `manufacturing.site` ended up with some 80+ dummy columns alone, but none were excluded during data preparation and selection due to lack of knowledge about what may or may not be truly relevant to the task at hand. Not only this, but other high-level predictors left in ultimately contributed to unanticipated slow training times. Tuning processes, at first, were taking up to an hour to execute even with CPU core allocation. Tuning parameters thus had to be extremely limited to ensure somewhat efficient run times. 
+
+The quality of a model is only as strong as the data provided to train it. Real-world global supply chain data often contains great variability that obscure the true nature of variable relationships that a prospective model is looking for. However, this does not mean the model is not useful, or the insights derived from its construction. Clearly, there was a significant spike in demand for certain countries between 2011 and 2015. This should be further investigated to inform future forecasting. Other modeling techniques might also be employed, such as predictive forecasting using cyclical demand patterns to project potential future demand.
+
+---
+
+## References
+
+1. CSS Table of Contents - https://bookdown.org/yihui/rmarkdown/html-document.html
+
+2. Efficient Package Installation - https://statsandr.com/blog/an-efficient-way-to-install-and-load-r-packages/
+
+3. CPU Core Allocation - https://forum.posit.co/t/cpu-usage-of-rstudio/179636
+
+4. About Supply Chain Modeling - https://www.coupa.com/blog/what-is-supply-chain-forecasting/
+
+5. DiagrammeR - https://bookdown.org/yihui/rmarkdown-cookbook/diagrams.html
+
+6. `caret` Modeling Options - https://topepo.github.io/caret/feature-selection-overview.html
+
+7. `get_best_result` - https://daviddalpiaz.github.io/r4sl/elastic-net.html
+
+8. `caret` Ensembling and Stacking - https://cran.r-project.org/web/packages/caretEnsemble/vignettes/caretEnsemble-intro.html https://zachmayer.github.io/caretEnsemble/ https://quantdev.ssri.psu.edu/sites/qdev/files/09_EnsembleMethods_2017_1127.html
+
+9. CART Modeling - https://rpubs.com/saqib/rpart https://scientistcafe.com/ids/regression-and-decision-tree-basic
+
+10. MARS Modeling - https://rpubs.com/erblast/mars https://rpubs.com/erblast/mars https://bradleyboehmke.github.io/HOML/mars.html#fitting-a-basic-mars-model
+
+11. Random Forest Modeling - https://www.rpubs.com/jkylearmstrong/RandomForest_w_caret
+
+12. Model Bagging - https://bradleyboehmke.github.io/HOML/bagging.html#why-bag
+
+13. `caret` Bagging Options - https://topepo.github.io/caret/train-models-by-tag.html#Bagging
+
+14. `xgbTree` - https://www.hackerearth.com/practice/machine-learning/machine-learning-algorithms/beginners-tutorial-on-xgboost-parameter-tuning-r/tutorial/
+
+---
+
+## Appendix
+
+### Data Dictionary
+
+1. **ID**: Numeric primary key indentifer of the line of data in our analytical tool 
+
+2. **Project Code**: PEPFAR project codes
+
+3. **PQ**: Price quote number; "Pre-PQ Process" indicates deliveries that occurred before the PQ process was put in place in mid-2009.
+
+4. **PO/SO**: Purchase order (PO) number (for Direct Drop deliveries), or sales order (SO) number (for from Regional Delivery Center (RDC) deliveries); PO is not applicable for RDC-originated deliveries
+
+5. **ASN/DN**: Shipment number; Advanced Shipment Note (ASN) for Direct Drop deliveries or Delivery Note (DN) for RDC-originated deliveries
+
+6. **Country**: Destination country
+
+7. **Managed By**: SCMS managing office; Program Management Office (PMO) in the U.S. or the relevant SCMS field office
+
+8. **Fulfill Via**: Method by which the shipment was fulfilled; Direct Drop from vendor or from stock available in the RDCs
+
+9. **Vendor INCO Term**: The vendor INCO term (also known as International Commercial Terms) for Direct Drop deliveries; not applicable for RDC-originated deliveries
+
+10. **Shipment Mode**: Method by which commodities are shipped
+
+11. **PQ First Sent to Client Date**: Date the PQ was first sent to the client; Pre-PQ Process indicates deliveries that occurred before the PQ process was put in place in mid-2009 and "Date Not Captured" denotes where date was not captured
+
+12. **PO Sent to Vendor Date**: Date the PO is first sent to the vendor; not applicable for RDC-originated deliveries; "Date Not Captured" denotes where date was not captured
+
+13. **Scheduled Delivery Date**: Current anticipated delivery date; this date is not equivalent to the client-promised delivery date and should not be used to determine on-time perform
+
+14. **Delivered to Client Date**: Actual date of delivery to client; transactions are included in the dataset only after the goods have been delivered to the client
+
+15. **Recorded Delivery Date**: Date delivery to client was actually recorded in SCMS information systems; used for official SCMS reporting. Deliveries are only recorded in SCMS systems once all necessary documentation has been received. Due to documentation delays, there can be a lag between the time goods are physically delivered to the client and the date on which all necessary documentation has been received
+
+16. **Product Group**: Product group for item (`ARV`, `HRDT`, `ACT`, `ANTM`, `ARV`, `HRDT`, `MRDT`)
+
+17. **Product Classification**: Identifies relevant product sub-classifications, such as whether ARVs are pediatric or adult, whether a malaria product is an artemisinin-based combination therapy (ACT), etc.
+
+18. **Vendor**: Vendor name; SCMS is the vendor for RDC-originated deliveries (product can be from multiple manufacturers, based on available stock)
+
+19. **Item Description**: Product name and formulation from Partnership for Supply Chain Management (PFSCM) Item Master
+
+20. **Molecule/Test Type**: Active drug(s) or test kit type
+
+21. **Brand**: Generic or branded name for the item
+
+22. **Dosage**: Item dosage with units
+
+23. **Dosage Form**: Dosage form for the item (tablet, oral solution, injection, etc.); `FDC` denotes if the item contains a fixed-dose combination (FDC) formulation, `Blister` denotes if the item is presented in blister packaging, and `Co-blister` denotes when the item contains more than one product packaged together in blister packaging.
+
+24. **Unit of Measure**: Pack quantity (pills or test kits) used to compute unit price
+
+25. **Line Item Quantity**: Total quantity (packs) of commodity per line item
+
+26. **Line Item Value**: Total value of commodity per line item in USD
+
+27. **Pack Price**: Cost per pack (i.e. month's supply of ARVs, pack of 60 test kits) in USD
+
+28. **Unit Price**: Cost per pill (for drugs) or per test (for test kits) in USD
+
+29. **Manufacturing Site**: Identifies manufacturing site for the line item for direct drop and RDC-originated deliveries
+
+30. **First Line Designation**: Designates if the line in question shows the aggregated freight costs and weight associated with all items on the ASN/DN; there may or may not be other associated lines with each ASN/DN
+
+31. **Weight**: Weight for all lines on an ASN/DN in kilograms; present only for `FirstLine` designated lines
+
+32. **Freight Cost**: Freight charges associated with all lines on the respective ASN/DN in USD; present only for `FirstLine` designated lines; for C- and D-vendor INCO terms deliveries, freight costs may be included in the unit price for the commodities as indicated by `Freight Included in Commodity Price`; all other lines are `Invoiced Separately`
